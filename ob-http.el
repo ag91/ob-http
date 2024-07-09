@@ -119,7 +119,7 @@
 
 (defun ob-http-pretty-json (str)
   (if (executable-find "jq")
-      (ob-http-shell-command-to-string "jq -r ." str)
+      (ob-http-shell-command-to-string "jq -j ." str)
     (with-temp-buffer
       (insert str)
       (json-pretty-print-buffer)
