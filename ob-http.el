@@ -50,7 +50,8 @@
     (resolve . :any)
     (max-time . :any)
     (data-binary . :any)
-    (print-curl . :any))
+    (print-curl . :any)
+    (upload-file . :any))
   "http header arguments")
 
 (defgroup ob-http nil
@@ -223,6 +224,7 @@
          (request-body (ob-http-request-body request))
          (error-output (org-babel-temp-file "curl-error"))
          (binary (assoc :data-binary params))
+         (upload-file (cdr (assoc :upload-file params)))
          (args
           (append
            ob-http:curl-custom-arguments
@@ -236,11 +238,12 @@
                    `("--user" ,(s-format "${:username}:${:password}" 'ob-http-aget params)))
                  (when (assoc :user params) `("--user" ,(cdr (assoc :user params))))
                  (mapcar (lambda (x) `("-H" ,x)) (ob-http-request-headers request))
-                 (when (s-present? request-body)
-                   (let ((tmp (org-babel-temp-file "http-"))
-                         (data-opt (if binary "--data-binary" "--data")))
-                     (with-temp-file tmp (insert request-body))
-                     (list data-opt (format "@%s" tmp))))
+                 (if (s-present? request-body)
+                     (let ((tmp (org-babel-temp-file "http-"))
+                           (data-opt (if binary "--data-binary" "--data")))
+                       (with-temp-file tmp (insert request-body))
+                       (list data-opt (format "@%s" tmp)))
+                   (when upload-file (list "--data-binary" (format "@%s" upload-file))))
                  (when cookie-jar `("--cookie-jar" ,cookie-jar))
                  (when cookie `("--cookie" ,cookie))
                  (when resolve (mapcar (lambda (x) `("--resolve" ,x)) (split-string resolve ",")))
