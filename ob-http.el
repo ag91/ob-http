@@ -49,7 +49,8 @@
     (path-prefix . :any)
     (resolve . :any)
     (max-time . :any)
-    (data-binary . :any))
+    (data-binary . :any)
+    (print-curl . :any))
   "http header arguments")
 
 (defgroup ob-http nil
