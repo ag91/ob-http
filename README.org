@@ -29,22 +29,26 @@ To use =ob-http= in an =org-babel= source block, the http language must be enabl
 #+END_SRC
 
 ** options
+:PROPERTIES:
+:ID:       ca8bff40-c329-40f5-928d-6ded1e68a39a
+:END:
 
-| option        | curl           | example                                                                                 |
-|---------------+----------------+-----------------------------------------------------------------------------------------|
-| =:proxy=      | =-x=           | =:proxy localhost:8118=                                                                 |
-| =:noproxy=    | =--noproxy *=  | N/A                                                                                     |
-| =:cookie-jar= | =--cookie-jar= | =:cookie-jar username=                                                                  |
-| =:cookie=     | =--cookie=     | =:cookie username=                                                                      |
-| =:max-time=   | =--max-time=   | default is =10=                                                                         |
-| =:user=       | =--user=       | =:user admin:passwd=                                                                    |
-| =:pretty=     | N/A            | =:pretty= use =Content-Type=, to overwrite =:pretty json=                               |
-| =:select=     | N/A            | =:select path= path will be passed to [[https://stedolan.github.io/jq/][jq]] for json or [[https://github.com/EricChiang/pup][pup]] for html or [[http://xmlstar.sourceforge.net/][xmlstarlet]] for xml |
-| =:get-header= | N/A            | =:get-header X-Subject-Token=                                                           |
-| =:curl=       | N/A            | =:curl --insecure --compressed= additional arguments for curl                           |
-| =:resolve=    | =--resolve=    | =:resolve example.com:80:127.0.0.1,example.com:443:127.0.0.1=                           |
-| =:data-binary= | =--data-binary= | Use =--data-binary= instead of =--data= in the curl command                               |
-| =:print-curl= | N/A            | Outputs the generated curl call as a string instead of actually calling curl.           |
+| option         | curl             | example                                                                                 |
+|----------------+------------------+-----------------------------------------------------------------------------------------|
+| =:proxy=       | =-x=             | =:proxy localhost:8118=                                                                 |
+| =:noproxy=     | =--noproxy *=    | N/A                                                                                     |
+| =:cookie-jar=  | =--cookie-jar=   | =:cookie-jar username=                                                                  |
+| =:cookie=      | =--cookie=       | =:cookie username=                                                                      |
+| =:max-time=    | =--max-time=     | default is =10=                                                                         |
+| =:user=        | =--user=         | =:user admin:passwd=                                                                    |
+| =:pretty=      | N/A              | =:pretty= use =Content-Type=, to overwrite =:pretty json=                               |
+| =:select=      | N/A              | =:select path= path will be passed to [[https://stedolan.github.io/jq/][jq]] for json or [[https://github.com/EricChiang/pup][pup]] for html or [[http://xmlstar.sourceforge.net/][xmlstarlet]] for xml |
+| =:get-header=  | N/A              | =:get-header X-Subject-Token=                                                           |
+| =:curl=        | N/A              | =:curl --insecure --compressed= additional arguments for curl                           |
+| =:resolve=     | =--resolve=      | =:resolve example.com:80:127.0.0.1,example.com:443:127.0.0.1=                           |
+| =:data-binary= | =--data-binary=  | Use =--data-binary= instead of =--data= in the curl command                             |
+| =:print-curl=  | N/A              | Outputs the generated curl call as a string instead of actually calling curl.           |
+| =:upload-file= | =--data-binary== | =:upload-file /tmp/test.txt=, if body is not defined, specified file will be sent       |
 
 ** examples
    
