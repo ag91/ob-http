@@ -51,27 +51,42 @@
     (max-time . :any)
     (data-binary . :any)
     (print-curl . :any)
+    (print-time-stats . :any)
     (upload-file . :any))
-  "http header arguments")
+  "Http header arguments.")
 
 (defgroup ob-http nil
-  "org-mode blocks for http request"
+  "Org-mode blocks for http request."
   :group 'org)
 
 (defcustom ob-http:max-time 10
-  "maximum time in seconds that you allow the whole operation to take"
+  "Maximum time in seconds that you allow the whole operation to take."
   :group 'ob-http
   :type 'integer)
 
 (defcustom ob-http:remove-cr nil
-  "remove carriage return from header"
+  "Remove carriage return from header."
   :group 'ob-http
   :type 'boolean)
 
 (defcustom ob-http:curl-custom-arguments nil
-  "List of custom headers that shall be added to each curl request"
+  "List of custom headers that shall be added to each curl request."
   :group 'ob-http
   :type '(repeat (string :format "%v")))
+
+(defcustom ob-http:curl-time-stats-format
+  "\n\n
+time_namelookup:  %{time_namelookup}s\n
+ time_connect (time to start connection):  %{time_connect}s\n
+   time_appconnect:  %{time_appconnect}s\n
+     time_pretransfer:  %{time_pretransfer}s\n
+      time_redirect:  %{time_redirect}s\n
+        time_starttransfer (time to first byte):  %{time_starttransfer}s\n
+                   ----------\n
+time_total:  %{time_total}s\n"
+  "Format for time stats requested with :print-time-stats header."
+  :group 'ob-http
+  :type 'string)
 
 (cl-defstruct ob-http-request method url headers body)
 (cl-defstruct ob-http-response headers body headers-map)
@@ -209,6 +224,7 @@
 (defun org-babel-execute:http (body params)
   (let* ((request (ob-http-parse-request (org-babel-expand-body:http body params)))
 	 (print-curl (assoc :print-curl params))
+         (print-time-stats (assoc :print-time-stats params))
          (proxy (cdr (assoc :proxy params)))
          (noproxy (assoc :noproxy params))
          (follow-redirect (and (assoc :follow-redirect params) (not (string= "no" (cdr (assoc :follow-redirect params))))))
@@ -246,6 +262,7 @@
                    (when upload-file (list "--data-binary" (format "@%s" upload-file))))
                  (when cookie-jar `("--cookie-jar" ,cookie-jar))
                  (when cookie `("--cookie" ,cookie))
+                 (when print-time-stats `("-w" ,ob-http:curl-time-stats-format))
                  (when resolve (mapcar (lambda (x) `("--resolve" ,x)) (split-string resolve ",")))
                  (when curl (split-string-and-unquote curl))
                  "--max-time"
