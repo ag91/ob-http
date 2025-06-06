@@ -5,7 +5,7 @@
 ;; Author: ZHOU Feng <zf.pascal@gmail.com>
 ;; URL: http://github.com/zweifisch/ob-http
 ;; Version: 0.0.1
-;; Package-Requires: ((s "1.9.0") (cl-lib "0.5"))
+;; Package-Requires: ((s "1.9.0") (cl-lib "0.5") (dash "2.20.0") (yaml "1.2.0") (ht "2.3"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -32,6 +32,8 @@
 (require 'json)
 (require 'ob-http-mode)
 (require 'cl-lib)
+(require 'dash)
+(require 'ht)
 
 (defconst org-babel-header-args:http
   '((pretty . :any)
@@ -325,6 +327,170 @@ enable variable expansion before source block is exported."
 
 (eval-after-load "org"
   '(add-to-list 'org-src-lang-modes '("http" . ob-http)))
+
+
+(defun ob-http-curl-to-ob-http (curl-as-string &optional modify-headers modify-uri)
+  "Turn CURL-AS-STRING to a ob-http block. MODIFY-HEADERS is a headers -> headers function."
+  (let* ((data (ignore-errors (s-trim (nth 1 (s-match "--data-raw\ +.*'\\({.*\n?}\\)" curl-as-string)))))
+         (method (or (nth 1 (s-match "-X '\\([A-z]+\\)' ?" curl-as-string)) (and data "POST") "GET"))
+         (uri (nth 1 (s-match "curl '\\(.+\\)' ?" curl-as-string)))
+         (headers (-flatten (-map 'cdr (s-match-strings-all "-H '\\(.+: .+\\)' ?" curl-as-string))))
+         )
+    (format "%s %s\n%s\n\n%s"
+            (upcase method)
+            (if (functionp modify-uri)
+                (funcall modify-uri uri)
+              uri)
+            (s-join "\n"
+                    (if (functionp modify-headers)
+                        (funcall modify-headers headers)
+                      headers))
+            (if data data ""))
+    ))
+(defun ob-http-curl-to-ob-http-in-kill-ring ()
+  "Copy curl into ob-http code in kill ring."
+  (interactive)
+  (if-let* ((kill (nth 0 kill-ring))
+            (_ (s-starts-with-p "curl" (s-trim kill))))
+      (kill-new
+       (ob-http-curl-to-ob-http kill))
+    (error "Not a curl command in kill ring, this will not work!")))
+
+(defun ob-http-to-curl (ob-block-as-string)
+  "Turn OB-BLOCK-AS-STRING to a curl command."
+  (let* ((block (s-trim ob-block-as-string))
+         (lines (s-lines block))
+         (headline (s-split " " (car lines)))
+         (method (nth 0 headline))
+         (uri (nth 1 headline))
+         (headers (--keep
+                   (and
+                    (string-match-p "^[A-z-]+:\ .*$" (s-trim it))
+                    (s-trim it))
+                   lines))
+         (data (when (-contains? '("PUT" "POST") method)
+                 (s-trim (nth 1 (s-split (-last-item headers) block))))))
+    (concat "curl '"
+            uri
+            "' \\\ \n"
+            "-X "
+            method
+            " \\\ \n "
+            (s-join
+             " \\\ \n"
+             (--map (concat "-H '" it "'") headers))
+            (when data
+              (concat " \\\ \n--data-raw '" data "'"))
+            )))
+
+(defun ob-http-to-curl-in-kill-ring ()
+  "Copy curret ob-http block as curl in kill ring."
+  (interactive)
+  (if-let ((e (org-element-at-point))
+           (_ (and
+               (equal (car e) 'src-block)
+               (equal (org-element-property :language e) "http"))))
+      (kill-new
+       (ob-http-to-curl
+        (org-element-property
+         :value
+         e)))
+    (error "Not on a ob-http source block, this will not work!")))
+
+(defun ob-http-intepret-parsed-swagger-file (ht-of-file)
+  "Take hash table HT-OF-FILE and turns it into a usable plist."
+  (cl-labels ((to-json (ht) ;; this translates a $ref schema ht to a json plist that is easy to json-encode
+                (-flatten-n
+                 1 ;; flatten the structure for properties on the same level so we get the json
+                 (ht-map
+                  (lambda (key value) ;; for each property/JSON field KEY of the schema (VALUE being the ht with description of the field)
+                    (list
+                     ;; name of field as a plist key
+                     (intern (concat ":" (format "%s" key)))
+                     ;; value is ideally example or type or can be another $ref schema
+                     (or (ht-get value 'example)
+                         (when-let (type (ht-get value 'type))
+                           (if (equal type "array")
+                               ;; array type defines items with schema (can be $ref)
+                               (or
+                                (-some--> (ht-get* value 'items 'type)
+                                  vector)
+                                ;; TODO refactor this
+                                (ignore-errors (--> (ht-get* value 'items '$ref)
+                                                    (s-split "/" it)
+                                                    cdr ;; skip hash
+                                                    (mapcar 'intern it)
+                                                    (apply 'ht-get* (cons ht-of-file it))
+                                                    to-json
+                                                    vector)))
+                             type))
+                         (ignore-errors
+                           ;; TODO this is the same as below, so refactor out
+                           (--> (ht-get value '$ref)
+                                (s-split "/" it)
+                                cdr ;; skip hash
+                                (mapcar 'intern it)
+                                (apply 'ht-get* (cons ht-of-file it))
+                                to-json))
+                         nil)))
+                  (ht-get ht 'properties)))))
+    (--> ht-of-file
+         (ht-get it 'paths) ;; paths are what is useful for using the api via ob-http
+         (ht-map (lambda (path ht)
+                   (ht-map
+                    (lambda (method ht1) ;; methods are under the path in the specification, so double iteration
+                      (list
+                       :path (concat
+                              ;; add the first server to make a valid http url
+                              (ignore-errors (ht-get (first (append (ht-get ht-of-file 'servers) nil)) 'url))
+                              ;; apparently the path is a symbol not a string
+                              (format "%s" path))
+                       :method method
+                       :body (-some--> (ignore-errors (ht-get* ht1 'requestBody 'content 'application/json 'schema '$ref)) ;; TODO not sure all OpenAPI docs follow this requestBody path, particularly the application/json...
+                               (s-split "/" it)
+                               cdr ;; skip hash
+                               (mapcar 'intern it)
+                               ;; since a path is $ref: '#/components/schemas/Pet', lisp's apply with ht-get* help us here
+                               (ignore-errors (apply 'ht-get* (cons ht-of-file it)))
+                               (to-json it))))
+                    ht))
+                 it))
+    ))
+
+(defun ob-http-swagger-to-ob-http (file)
+  "Get a yaml FILE and select endpoint."
+  (interactive "f")
+  (let ((swagger-as-plist
+         (ob-http-intepret-parsed-swagger-file
+          (--> (require 'yaml)
+               (with-temp-buffer
+                 (insert-file-contents file)
+                 (buffer-substring-no-properties
+                  (point-min)
+                  (point-max)))
+               (yaml-parse-string it)
+               ))))
+    (--> (--map
+          (cons (format "%s %s" (plist-get it :method) (plist-get it :path)) it)
+          (-flatten-n 1 swagger-as-plist))
+         (alist-get
+          (completing-read
+           "Pick" it)
+          it
+          nil
+          nil
+          'equal)
+         ;; TODO it would be just super easy to export as curl at this point
+         (format "%s %s\n%s\n\n%s" (upcase (symbol-name (plist-get it :method))) (plist-get it :path) "TODO: header"
+                 ;; prettify encoded json
+                 (with-temp-buffer
+                   (insert (json-encode (plist-get it :body)))
+                   (json-pretty-print (point-min)
+                                      (point-max))
+                   (buffer-string)))
+         kill-new)
+    )
+  )
 
 (provide 'ob-http)
 ;;; ob-http.el ends here
