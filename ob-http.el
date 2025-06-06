@@ -34,6 +34,7 @@
 (require 'cl-lib)
 (require 'dash)
 (require 'ht)
+(require 'yaml)
 
 (defconst org-babel-header-args:http
   '((pretty . :any)
@@ -457,22 +458,28 @@ enable variable expansion before source block is exported."
                  it))
     ))
 
+(defvar ob-http-swagger-cache (ht-create) "Hash table file-name+hash to interpreted file.")
+
 (defun ob-http-swagger-to-ob-http (file)
   "Get a yaml FILE and select endpoint."
   (interactive "f")
-  (let ((swagger-as-plist
-         (ob-http-intepret-parsed-swagger-file
-          (--> (require 'yaml)
-               (with-temp-buffer
-                 (insert-file-contents file)
-                 (buffer-substring-no-properties
-                  (point-min)
-                  (point-max)))
-               (yaml-parse-string it)
-               ))))
-    (--> (--map
+  (let* ((file-contents (with-temp-buffer
+                          (insert-file-contents file)
+                          (buffer-substring-no-properties
+                           (point-min)
+                           (point-max))))
+         (ht-key (concat file "_" (secure-hash 'sha256 file-contents)))
+         (swagger-as-plist
+          (or (ht-get ob-http-swagger-cache ht-key)
+              (ob-http-intepret-parsed-swagger-file
+               (--> file-contents
+                    (yaml-parse-string it)))))
+         (_ (ht-set ob-http-swagger-cache ht-key swagger-as-plist)))
+    (--> swagger-as-plist
+         (-flatten-n 1 it)
+         (--map
           (cons (format "%s %s" (plist-get it :method) (plist-get it :path)) it)
-          (-flatten-n 1 swagger-as-plist))
+          it)
          (alist-get
           (completing-read
            "Pick" it)
