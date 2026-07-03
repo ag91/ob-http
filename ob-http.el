@@ -55,7 +55,8 @@
     (data-binary . :any)
     (print-curl . :any)
     (print-time-stats . :any)
-    (upload-file . :any))
+    (upload-file . :any)
+    (repeat-over . :any))
   "Http header arguments.")
 
 (defgroup ob-http nil
@@ -208,6 +209,81 @@ time_total:  %{time_total}s\n"
 (defun ob-http-aget (key alist)
   (assoc-default (intern key) alist))
 
+(defun ob-http-format-variable (value)
+  "Format VALUE for substitution as a JSON-compatible value."
+  (cond
+   ((stringp value) (json-encode-string value))
+   ((numberp value) (number-to-string value))
+   ((eq value t) "true")
+   ((null value) "null")
+   ((eq value :null) "null")
+   ((eq value :false) "false")
+   (t (format "%s" value))))
+
+(defun ob-http-normalize-bindings (item)
+  "Normalize ITEM to an alist with string keys."
+  (cond
+   ((and (listp item) (keywordp (car item)))
+    (let (result)
+      (while item
+        (push (cons (substring (symbol-name (car item)) 1) (cadr item)) result)
+        (setq item (cddr item)))
+      (nreverse result)))
+   ((listp item)
+    (mapcar (lambda (pair)
+              (cons (cond ((keywordp (car pair))
+                           (substring (symbol-name (car pair)) 1))
+                         ((symbolp (car pair))
+                          (symbol-name (car pair)))
+                         ((stringp (car pair)) (car pair))
+                         (t (format "%s" (car pair))))
+                    (cdr pair)))
+            item))
+   (t (error "Invalid binding item: %S" item))))
+
+(defun ob-http-parse-repeat-over (value)
+  "Parse :repeat-over VALUE into a list of binding alists."
+  (cond
+   ((stringp value)
+    (let* ((trimmed (s-trim value))
+           (raw-items (if (string-prefix-p "(" trimmed)
+                          (eval (read trimmed))
+                        (json-read-from-string trimmed))))
+      (mapcar #'ob-http-normalize-bindings raw-items)))
+   ((listp value)
+    (mapcar #'ob-http-normalize-bindings value))
+   (t (error "Invalid :repeat-over value: %S" value))))
+
+(defun ob-http-substitute-variables (body bindings)
+  "Substitute ${variable} and $variable references in BODY using BINDINGS."
+  (with-temp-buffer
+    (insert body)
+    (goto-char (point-min))
+    (while (re-search-forward "\\$\\(?:{\\([^}]+\\)}\\|\\([a-zA-Z_][a-zA-Z0-9_-]*\\)\\)" nil t)
+      (let* ((var-name (or (match-string 1) (match-string 2)))
+             (value (assoc-default var-name bindings)))
+        (when value
+          (replace-match (ob-http-format-variable value) t t))))
+    (buffer-string)))
+
+(defun ob-http-execute-repeat (body params repeat-over)
+  "Execute the HTTP request in BODY for each item in REPEAT-OVER."
+  (let* ((items (ob-http-parse-repeat-over repeat-over))
+         (results nil)
+         (clean-params (assq-delete-all :repeat-over params)))
+    (dolist (bindings items)
+      (let* ((expanded-body (org-babel-expand-body:http body params))
+             (substituted-body (ob-http-substitute-variables expanded-body bindings))
+             (result (org-babel-execute:http substituted-body clean-params))
+             (annotation (format "// %s"
+                                 (string-join
+                                  (mapcar (lambda (b)
+                                            (format "%s: %s" (car b) (cdr b)))
+                                          bindings)
+                                  " "))))
+        (push (concat annotation "\n" result) results)))
+    (string-join (nreverse results) "\n\n")))
+
 (defun ob-http-construct-url (path params)
   (if (s-starts-with? "/" path)
       (s-concat
@@ -225,7 +301,10 @@ time_total:  %{time_total}s\n"
       (insert body))))
 
 (defun org-babel-execute:http (body params)
-  (let* ((request (ob-http-parse-request (org-babel-expand-body:http body params)))
+  (let ((repeat-over (cdr (assoc :repeat-over params))))
+    (if repeat-over
+        (ob-http-execute-repeat body params repeat-over)
+      (let* ((request (ob-http-parse-request (org-babel-expand-body:http body params)))
 	 (print-curl (assoc :print-curl params))
          (print-time-stats (assoc :print-time-stats params))
          (proxy (cdr (assoc :proxy params)))
@@ -308,7 +387,7 @@ time_total:  %{time_total}s\n"
                       (string-prefix-p "  " s)))
                 (string-lines error-output))
                "\n"))
-            ))))))
+            ))))))))
 
 (defun ob-http-export-expand-variables (&optional backend)
   "Scan current buffer for all HTTP source code blocks and expand variables.
